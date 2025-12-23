@@ -13,11 +13,21 @@ local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
 -- CATEGORY DEFINITIONS
 --============================================
 local CATEGORIES = {
-    {name = "Tools", keywords = {"pickaxe", "axe", "shovel", "hoe", "sword", "bow", "crossbow", "trident", "shield", "fishing_rod", "shears", "flint_and_steel"}},
-    {name = "Blocks", keywords = {"stone", "dirt", "grass", "wood", "plank", "log", "brick", "glass", "sand", "gravel", "concrete", "terracotta", "wool", "slab", "stairs", "fence", "wall", "door"}},
-    {name = "Food", keywords = {"beef", "pork", "chicken", "mutton", "rabbit", "cod", "salmon", "bread", "apple", "carrot", "potato", "beetroot", "melon", "cookie", "cake", "pie", "stew", "soup", "golden_apple"}},
-    {name = "Ores", keywords = {"ore", "raw_", "ingot", "nugget", "diamond", "emerald", "gold", "iron", "copper", "coal", "lapis", "redite", "netherite", "amethyst"}},
-    {name = "Redstone", keywords = {"redstone", "repeater", "comparator", "piston", "lever", "button", "pressure_plate", "tripwire", "observer", "dropper", "dispenser", "hopper", "rail"}},
+    {name = "Tools", keywords = {"pickaxe", "axe", "shovel", "hoe", "hammer", "wrench", "paxel", "drill", "saw", "cutter", "multitool", "excavator", "sickle", "scythe", "shears", "flint_and_steel", "fishing_rod", "tinker", "mattock"}},
+    {name = "Weapons", keywords = {"sword", "bow", "crossbow", "trident", "shield", "dagger", "rapier", "katana", "staff", "wand", "gun", "rifle", "blade", "cleaver", "mace", "spear", "halberd", "battleaxe", "launcher"}},
+    {name = "Armor", keywords = {"helmet", "chestplate", "leggings", "boots", "cap", "tunic", "pants", "armor", "cuirass", "greaves", "sabatons", "coif", "chainmail", "plate"}},
+    {name = "Blocks", keywords = {"stone", "dirt", "grass", "wood", "plank", "log", "brick", "glass", "sand", "gravel", "concrete", "terracotta", "wool", "slab", "stairs", "fence", "wall", "door", "trapdoor", "tile", "panel", "beam", "column", "pillar", "frame", "casing", "hull"}},
+    {name = "Food", keywords = {"beef", "pork", "chicken", "mutton", "rabbit", "cod", "salmon", "bread", "apple", "carrot", "potato", "beetroot", "melon", "cookie", "cake", "pie", "stew", "soup", "golden_apple", "cooked", "raw_", "food", "meal", "snack", "fruit", "vegetable", "meat", "fish", "berry", "cheese", "sandwich", "toast", "jerky", "sushi"}},
+    {name = "Ores", keywords = {"ore", "raw_iron", "raw_gold", "raw_copper", "ingot", "nugget", "diamond", "emerald", "gold", "iron", "copper", "coal", "lapis", "redstone", "netherite", "amethyst", "tin", "lead", "silver", "nickel", "aluminum", "aluminium", "zinc", "uranium", "titanium", "tungsten", "platinum", "osmium", "iridium", "certus", "quartz", "ruby", "sapphire", "peridot"}},
+    {name = "Materials", keywords = {"dust", "gear", "plate", "rod", "wire", "cable", "nugget", "chunk", "shard", "fragment", "essence", "crystal", "gem", "pearl", "alloy", "blend", "compound", "circuit", "chip", "processor", "component", "module", "coil", "casing"}},
+    {name = "Machines", keywords = {"machine", "furnace", "generator", "engine", "crusher", "grinder", "pulverizer", "smelter", "centrifuge", "press", "compressor", "extractor", "fabricator", "assembler", "inscriber", "interface", "terminal", "controller", "core", "reactor", "turbine", "solar", "battery", "capacitor", "cell", "tank", "pump", "pipe", "conduit", "duct", "cable", "quarry", "miner", "laser"}},
+    {name = "Redstone", keywords = {"repeater", "comparator", "piston", "lever", "button", "pressure_plate", "tripwire", "observer", "dropper", "dispenser", "hopper", "rail", "minecart", "detector", "daylight", "target", "sculk"}},
+    {name = "Potions", keywords = {"potion", "splash", "lingering", "tipped_arrow", "bottle", "vial", "flask", "brew", "elixir", "tonic", "philter"}},
+    {name = "Magic", keywords = {"enchant", "spell", "rune", "sigil", "scroll", "tome", "grimoire", "ritual", "altar", "mana", "aura", "vis", "thaumcraft", "botania", "ars", "blood_magic", "astral", "totem", "talisman", "amulet", "ring", "bauble", "curio", "charm"}},
+    {name = "Plants", keywords = {"seed", "sapling", "flower", "plant", "crop", "wheat", "mushroom", "fungus", "spore", "root", "leaf", "leaves", "vine", "moss", "fern", "bamboo", "cactus", "kelp", "lily", "rose", "tulip", "orchid", "allium", "cornflower", "dandelion", "poppy", "azalea", "dripleaf"}},
+    {name = "Mob Drops", keywords = {"bone", "string", "feather", "leather", "hide", "pelt", "fur", "scale", "slime", "ender_pearl", "blaze", "ghast", "phantom", "membrane", "shell", "horn", "tusk", "fang", "tooth", "claw", "skull", "head", "spawn_egg", "egg"}},
+    {name = "Deco", keywords = {"banner", "painting", "item_frame", "armor_stand", "pot", "vase", "candle", "lantern", "lamp", "torch", "chandelier", "carpet", "rug", "curtain", "bed", "chair", "table", "shelf", "bookshelf", "sign", "bell", "chain", "lightning_rod", "flower_pot", "decorated"}},
+    {name = "Storage", keywords = {"chest", "barrel", "shulker", "crate", "bag", "backpack", "pouch", "sack", "drawer", "cabinet", "locker", "vault", "safe", "strongbox", "bin", "silo"}},
     {name = "Misc", keywords = {}}  -- Catch-all category
 }
 
@@ -64,6 +74,9 @@ local monitorWidth, monitorHeight = 0, 0
 local isSearching = false
 local statusMessage = ""
 local statusColor = COLORS.success
+
+-- Forward declaration for functions called before definition
+local drawUI
 
 --============================================
 -- INITIALIZATION
@@ -327,52 +340,63 @@ local function drawHeader()
     monitor.setCursorPos(2, 1)
     monitor.write("INVENTORY SYSTEM")
 
-    -- Search box
-    monitor.setCursorPos(1, 2)
-    monitor.clearLine()
-    monitor.setCursorPos(2, 2)
-    monitor.write("Search: ")
-
-    monitor.setBackgroundColor(COLORS.searchBg)
-    monitor.setTextColor(COLORS.searchText)
-    local searchBoxWidth = 25
-    local displaySearch = searchTerm
-    if #displaySearch > searchBoxWidth - 2 then
-        displaySearch = string.sub(displaySearch, 1, searchBoxWidth - 2)
-    end
-    monitor.write("[" .. displaySearch .. string.rep(" ", searchBoxWidth - 2 - #displaySearch) .. "]")
-
-    -- Refresh button
+    -- Refresh button on header
     monitor.setBackgroundColor(COLORS.button)
     monitor.setTextColor(COLORS.buttonText)
-    monitor.setCursorPos(monitorWidth - 10, 2)
+    monitor.setCursorPos(monitorWidth - 10, 1)
     monitor.write(" REFRESH ")
 end
 
+local function getCategoryList()
+    local cats = {"All"}
+    for _, cat in ipairs(CATEGORIES) do
+        table.insert(cats, cat.name)
+    end
+    return cats
+end
+
 local function drawCategories()
-    monitor.setCursorPos(1, 4)
+    -- Use two rows for categories (rows 2 and 3)
     monitor.setBackgroundColor(COLORS.categoryBg)
+    monitor.setCursorPos(1, 2)
+    monitor.clearLine()
+    monitor.setCursorPos(1, 3)
     monitor.clearLine()
 
-    local categories = {"All", "Tools", "Blocks", "Food", "Ores", "Redstone", "Misc"}
+    local categories = getCategoryList()
     local x = 2
+    local row = 2
 
     for _, cat in ipairs(categories) do
+        local catWidth = #cat + 2
+        -- Wrap to next row if needed
+        if x + catWidth > monitorWidth - 1 and row == 2 then
+            x = 2
+            row = 3
+        end
+
         if currentCategory == cat then
             monitor.setBackgroundColor(COLORS.categoryActive)
         else
             monitor.setBackgroundColor(COLORS.categoryBg)
         end
         monitor.setTextColor(COLORS.categoryText)
-        monitor.setCursorPos(x, 4)
+        monitor.setCursorPos(x, row)
         monitor.write(" " .. cat .. " ")
-        x = x + #cat + 3
+        x = x + catWidth + 1
     end
 
-    -- Fill rest of line
+    -- Fill rest of lines
     monitor.setBackgroundColor(COLORS.categoryBg)
-    monitor.setCursorPos(x, 4)
-    monitor.write(string.rep(" ", monitorWidth - x + 1))
+    if row == 2 then
+        monitor.setCursorPos(x, 2)
+        monitor.write(string.rep(" ", monitorWidth - x + 1))
+        monitor.setCursorPos(1, 3)
+        monitor.write(string.rep(" ", monitorWidth))
+    else
+        monitor.setCursorPos(x, 3)
+        monitor.write(string.rep(" ", monitorWidth - x + 1))
+    end
 end
 
 local function drawItemList()
@@ -380,15 +404,15 @@ local function drawItemList()
 
     -- Header row
     monitor.setTextColor(COLORS.listHighlight)
-    monitor.setCursorPos(1, 6)
+    monitor.setCursorPos(1, 5)
     monitor.clearLine()
-    monitor.setCursorPos(3, 6)
+    monitor.setCursorPos(3, 5)
     monitor.write("Item Name")
-    monitor.setCursorPos(monitorWidth - 12, 6)
+    monitor.setCursorPos(monitorWidth - 12, 5)
     monitor.write("Count")
 
     -- Separator
-    monitor.setCursorPos(1, 7)
+    monitor.setCursorPos(1, 6)
     monitor.setTextColor(COLORS.listItemAlt)
     monitor.write(string.rep("-", monitorWidth))
 
@@ -396,13 +420,13 @@ local function drawItemList()
     local startIdx = (currentPage - 1) * ITEMS_PER_PAGE + 1
     local endIdx = math.min(startIdx + ITEMS_PER_PAGE - 1, #filteredItems)
 
-    for i = 8, 7 + ITEMS_PER_PAGE do
+    for i = 7, 6 + ITEMS_PER_PAGE do
         monitor.setCursorPos(1, i)
         monitor.setBackgroundColor(COLORS.listBg)
         monitor.clearLine()
     end
 
-    local row = 8
+    local row = 7
     for i = startIdx, endIdx do
         local item = filteredItems[i]
         if item then
@@ -429,19 +453,11 @@ local function drawItemList()
 end
 
 local function drawFooter()
+    local searchY = monitorHeight - 2
     local footerY = monitorHeight - 1
+    local statusY = monitorHeight
 
-    -- Status message
-    monitor.setBackgroundColor(COLORS.bg)
-    monitor.setCursorPos(1, footerY - 1)
-    monitor.clearLine()
-    if statusMessage ~= "" then
-        monitor.setTextColor(statusColor)
-        monitor.setCursorPos(3, footerY - 1)
-        monitor.write(statusMessage)
-    end
-
-    -- Footer bar
+    -- Footer bar with page info and nav
     monitor.setBackgroundColor(COLORS.footer)
     monitor.setTextColor(COLORS.footerText)
     monitor.setCursorPos(1, footerY)
@@ -467,9 +483,36 @@ local function drawFooter()
         monitor.setCursorPos(monitorWidth - 10, footerY)
         monitor.write(" NEXT > ")
     end
+
+    -- Search box row
+    monitor.setBackgroundColor(COLORS.header)
+    monitor.setTextColor(COLORS.headerText)
+    monitor.setCursorPos(1, searchY)
+    monitor.clearLine()
+    monitor.setCursorPos(2, searchY)
+    monitor.write("Search: ")
+
+    monitor.setBackgroundColor(COLORS.searchBg)
+    monitor.setTextColor(COLORS.searchText)
+    local searchBoxWidth = 25
+    local displaySearch = searchTerm
+    if #displaySearch > searchBoxWidth - 2 then
+        displaySearch = string.sub(displaySearch, 1, searchBoxWidth - 2)
+    end
+    monitor.write("[" .. displaySearch .. string.rep(" ", searchBoxWidth - 2 - #displaySearch) .. "]")
+
+    -- Status message row (bottom)
+    monitor.setBackgroundColor(COLORS.bg)
+    monitor.setCursorPos(1, statusY)
+    monitor.clearLine()
+    if statusMessage ~= "" then
+        monitor.setTextColor(statusColor)
+        monitor.setCursorPos(3, statusY)
+        monitor.write(statusMessage)
+    end
 end
 
-local function drawUI()
+drawUI = function()
     monitor.setBackgroundColor(COLORS.bg)
     monitor.clear()
 
@@ -482,26 +525,33 @@ end
 --============================================
 -- TOUCH HANDLING
 --============================================
-local function getCategoryAtPos(x)
-    local categories = {"All", "Tools", "Blocks", "Food", "Ores", "Redstone", "Misc"}
-    local pos = 2
+local function getCategoryAtPos(x, y)
+    local categories = getCategoryList()
+    local posX = 2
+    local row = 2
 
     for _, cat in ipairs(categories) do
         local catWidth = #cat + 2
-        if x >= pos and x < pos + catWidth then
+        -- Wrap to next row if needed
+        if posX + catWidth > monitorWidth - 1 and row == 2 then
+            posX = 2
+            row = 3
+        end
+
+        if y == row and x >= posX and x < posX + catWidth then
             return cat
         end
-        pos = pos + catWidth + 1
+        posX = posX + catWidth + 1
     end
     return nil
 end
 
 local function getItemAtPos(y)
-    if y < 8 or y > 7 + ITEMS_PER_PAGE then
+    if y < 7 or y > 6 + ITEMS_PER_PAGE then
         return nil
     end
 
-    local idx = (currentPage - 1) * ITEMS_PER_PAGE + (y - 7)
+    local idx = (currentPage - 1) * ITEMS_PER_PAGE + (y - 6)
     if idx <= #filteredItems then
         return filteredItems[idx]
     end
@@ -509,8 +559,11 @@ local function getItemAtPos(y)
 end
 
 local function handleTouch(x, y)
-    -- Search box click (row 2, x 10-35)
-    if y == 2 and x >= 10 and x <= 35 then
+    local searchY = monitorHeight - 2
+    local footerY = monitorHeight - 1
+
+    -- Search box click (bottom area, x 10-35)
+    if y == searchY and x >= 10 and x <= 35 then
         isSearching = true
         statusMessage = "Type to search, Enter to confirm, Esc to cancel"
         statusColor = COLORS.listHighlight
@@ -518,8 +571,8 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Refresh button (row 2, right side)
-    if y == 2 and x >= monitorWidth - 10 then
+    -- Refresh button (row 1, right side)
+    if y == 1 and x >= monitorWidth - 10 then
         statusMessage = "Refreshing inventory..."
         statusColor = COLORS.listHighlight
         drawUI()
@@ -531,9 +584,9 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Category buttons (row 4)
-    if y == 4 then
-        local cat = getCategoryAtPos(x)
+    -- Category buttons (rows 2 and 3)
+    if y == 2 or y == 3 then
+        local cat = getCategoryAtPos(x, y)
         if cat then
             currentCategory = cat
             currentPage = 1
@@ -543,7 +596,7 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Item list (rows 8+)
+    -- Item list (rows 7+)
     local item = getItemAtPos(y)
     if item then
         statusMessage = "Retrieving " .. item.displayName .. "..."
@@ -555,7 +608,6 @@ local function handleTouch(x, y)
     end
 
     -- Previous page
-    local footerY = monitorHeight - 1
     if y == footerY and x >= monitorWidth - 20 and x < monitorWidth - 10 and currentPage > 1 then
         currentPage = currentPage - 1
         drawUI()
