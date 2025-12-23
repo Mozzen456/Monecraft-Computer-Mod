@@ -9,6 +9,7 @@ local INPUT_CHEST = "minecraft:chest_8"   -- Set this to your input/dump chest's
 local ITEMS_PER_PAGE = 14                  -- Number of items shown per page (legacy, now auto-calculated)
 local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
 local FULL_RESCAN_INTERVAL = 10            -- Seconds between full inventory rescans
+local SEARCH_CLEAR_DELAY = 10              -- Seconds after search to auto-clear (0 to disable)
 local MONITOR_SCALE = 0.5                  -- Text scale: 0.5 (smallest) to 5.0 (largest). For 3x5 monitor try 0.5-1.0
 local SCALE_OPTIONS = {0.5, 1.0, 1.5, 2.0} -- Available scale options for the scale button
 local currentScaleIndex = 1                -- Index into SCALE_OPTIONS (0.5 by default)
@@ -72,6 +73,7 @@ local furnaces = {}        -- {name -> peripheral} for auto-collection
 local outputChest = nil
 local inputChest = nil
 local itemIndex = {}       -- {itemName -> {displayName, total, locations=[{chest, slot, count}]}}
+local displayNameCache = {} -- Cache display names to avoid slow getItemDetail calls
 local filteredItems = {}   -- Current filtered list for display
 local currentCategory = "All"
 local searchTerm = ""
@@ -79,6 +81,7 @@ local currentPage = 1
 local totalPages = 1
 local monitorWidth, monitorHeight = 0, 0
 local isSearching = false
+local lastSearchTime = 0                   -- When search was last confirmed
 local statusMessage = ""
 local statusColor = COLORS.success
 
@@ -363,55 +366,47 @@ local function scanInventory()
 
     for chestName, chest in pairs(storageChests) do
         chestCount = chestCount + 1
-        local chestStacks = 0
 
-        -- Try to re-wrap the peripheral in case connection was lost
-        local freshChest = peripheral.wrap(chestName)
-        if not freshChest then
-            failedChests = failedChests + 1
-        else
-            -- Update our reference
-            storageChests[chestName] = freshChest
-            chest = freshChest
+        local success, items = pcall(function() return chest.list() end)
+        if success and items then
+            for slot, item in pairs(items) do
+                totalStacks = totalStacks + 1
+                local key = item.name
 
-            local success, items = pcall(function() return chest.list() end)
-            if success and items then
-                for slot, item in pairs(items) do
-                    totalStacks = totalStacks + 1
-                    chestStacks = chestStacks + 1
-                    local detail = nil
-                    local ok, res = pcall(function() return chest.getItemDetail(slot) end)
-                    if ok then detail = res end
-
-                    local displayName = detail and detail.displayName or item.name
-                    local key = item.name
-
-                    if not itemIndex[key] then
-                        itemIndex[key] = {
-                            name = item.name,
-                            displayName = displayName,
-                            total = 0,
-                            category = getCategory(item.name),
-                            locations = {}
-                        }
-                        uniqueItems = uniqueItems + 1
+                -- Use cached display name, or fetch if not cached
+                local displayName = displayNameCache[key]
+                if not displayName then
+                    local ok, detail = pcall(function() return chest.getItemDetail(slot) end)
+                    if ok and detail and detail.displayName then
+                        displayName = detail.displayName
+                    else
+                        displayName = item.name
                     end
-
-                    itemIndex[key].total = itemIndex[key].total + item.count
-                    table.insert(itemIndex[key].locations, {
-                        chest = chestName,
-                        slot = slot,
-                        count = item.count
-                    })
+                    displayNameCache[key] = displayName
                 end
-            else
-                failedChests = failedChests + 1
+
+                if not itemIndex[key] then
+                    itemIndex[key] = {
+                        name = item.name,
+                        displayName = displayName,
+                        total = 0,
+                        category = getCategory(item.name),
+                        locations = {}
+                    }
+                    uniqueItems = uniqueItems + 1
+                end
+
+                itemIndex[key].total = itemIndex[key].total + item.count
+                table.insert(itemIndex[key].locations, {
+                    chest = chestName,
+                    slot = slot,
+                    count = item.count
+                })
             end
+        else
+            failedChests = failedChests + 1
         end
     end
-
-    print("Scanned " .. chestCount .. " chests (" .. failedChests .. " failed)")
-    print("Found " .. totalStacks .. " stacks, " .. uniqueItems .. " unique items")
 end
 
 local function filterItems()
@@ -586,7 +581,17 @@ local function autoSortLoop()
         local now = os.clock()
         local needsFullRescan = (now - lastFullRescan) >= FULL_RESCAN_INTERVAL
 
-        if movedFromInput or movedFromFurnaces or needsFullRescan then
+        -- Check if search should be auto-cleared
+        local searchCleared = false
+        if SEARCH_CLEAR_DELAY > 0 and searchTerm ~= "" and lastSearchTime > 0 then
+            if (now - lastSearchTime) >= SEARCH_CLEAR_DELAY then
+                searchTerm = ""
+                lastSearchTime = 0
+                searchCleared = true
+            end
+        end
+
+        if movedFromInput or movedFromFurnaces or needsFullRescan or searchCleared then
             if needsFullRescan then
                 -- Rescan for new/disconnected peripherals
                 rescanPeripherals()
@@ -916,9 +921,6 @@ local function handleTouch(x, y)
     -- Item list (rows 4 to monitorHeight - 5) - directly extract a stack
     local item = getItemAtPos(y)
     if item then
-        statusMessage = "Retrieving " .. item.displayName .. "..."
-        statusColor = COLORS.listHighlight
-        drawUI()
         retrieveItem(item, 64)
         drawUI()
         return
@@ -947,6 +949,9 @@ local function handleKey(key)
         filterItems()
         currentPage = 1
         statusMessage = ""
+        if searchTerm ~= "" then
+            lastSearchTime = os.clock()  -- Start the auto-clear timer
+        end
         drawUI()
     elseif key == keys.escape then
         isSearching = false
