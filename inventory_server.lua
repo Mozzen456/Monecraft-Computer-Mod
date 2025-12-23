@@ -4,7 +4,7 @@
 --============================================
 -- CONFIGURATION
 --============================================
-local OUTPUT_CHEST = "minecraft:chest_9"  -- Set this to your output chest's peripheral name
+local OUTPUT_CHEST = "minecraft:chest_20"  -- Set this to your output chest's peripheral name
 local INPUT_CHEST = "minecraft:chest_8"   -- Set this to your input/dump chest's peripheral name
 local ITEMS_PER_PAGE = 14                  -- Number of items shown per page
 local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
@@ -97,20 +97,53 @@ local function findPeripherals()
     monitor.setTextScale(0.5)
     monitorWidth, monitorHeight = monitor.getSize()
 
-    -- Find modem for network access
+    -- Find wired modem for network access
+    local modemName = nil
     modem = peripheral.find("modem", function(name, wrapped)
-        return not wrapped.isWireless()
+        if not wrapped.isWireless() then
+            modemName = name
+            return true
+        end
+        return false
     end)
 
     if not modem then
-        error("No wired modem found! Please attach a wired modem.")
+        print("WARNING: No wired modem found! Only local peripherals will be used.")
     end
 
-    -- Get all inventories on the network
-    local allPeripherals = peripheral.getNames()
+    -- Get all inventories (both local and networked)
+    local allPeripherals = {}
 
-    for _, name in ipairs(allPeripherals) do
-        if peripheral.hasType(name, "inventory") then
+    -- Add local peripherals
+    for _, name in ipairs(peripheral.getNames()) do
+        allPeripherals[name] = true
+    end
+
+    -- Add remote peripherals from wired modem
+    if modem and modem.getNamesRemote then
+        for _, name in ipairs(modem.getNamesRemote()) do
+            allPeripherals[name] = true
+        end
+    end
+
+    print("Scanning peripherals...")
+    for name, _ in pairs(allPeripherals) do
+        local hasInventory = false
+
+        -- Try multiple ways to detect inventory capability
+        if peripheral.hasType then
+            hasInventory = peripheral.hasType(name, "inventory")
+        end
+
+        -- Fallback: try to wrap and check for list() method
+        if not hasInventory then
+            local p = peripheral.wrap(name)
+            if p and type(p.list) == "function" then
+                hasInventory = true
+            end
+        end
+
+        if hasInventory then
             if name == OUTPUT_CHEST then
                 outputChest = peripheral.wrap(name)
                 print("Output chest: " .. name)
@@ -162,12 +195,19 @@ end
 
 local function scanInventory()
     itemIndex = {}
+    local totalItems = 0
+    local chestCount = 0
 
     for chestName, chest in pairs(storageChests) do
-        local items = chest.list()
-        if items then
+        chestCount = chestCount + 1
+        local success, items = pcall(function() return chest.list() end)
+        if success and items then
             for slot, item in pairs(items) do
-                local detail = chest.getItemDetail(slot)
+                totalItems = totalItems + 1
+                local detail = nil
+                local ok, res = pcall(function() return chest.getItemDetail(slot) end)
+                if ok then detail = res end
+
                 local displayName = detail and detail.displayName or item.name
                 local key = item.name
 
@@ -190,6 +230,8 @@ local function scanInventory()
             end
         end
     end
+
+    print("Scanned " .. chestCount .. " chests, found " .. totalItems .. " item stacks")
 end
 
 local function filterItems()
@@ -340,11 +382,9 @@ local function drawHeader()
     monitor.setCursorPos(2, 1)
     monitor.write("INVENTORY SYSTEM")
 
-    -- Refresh button on header
-    monitor.setBackgroundColor(COLORS.button)
-    monitor.setTextColor(COLORS.buttonText)
-    monitor.setCursorPos(monitorWidth - 10, 1)
-    monitor.write(" REFRESH ")
+    -- Item count on header
+    monitor.setCursorPos(monitorWidth - 15, 1)
+    monitor.write("Items: " .. #filteredItems)
 end
 
 local function getCategoryList()
@@ -356,23 +396,26 @@ local function getCategoryList()
 end
 
 local function drawCategories()
-    -- Use two rows for categories (rows 2 and 3)
+    -- Use two rows for categories at the bottom
+    local catRow1 = monitorHeight - 4
+    local catRow2 = monitorHeight - 3
+
     monitor.setBackgroundColor(COLORS.categoryBg)
-    monitor.setCursorPos(1, 2)
+    monitor.setCursorPos(1, catRow1)
     monitor.clearLine()
-    monitor.setCursorPos(1, 3)
+    monitor.setCursorPos(1, catRow2)
     monitor.clearLine()
 
     local categories = getCategoryList()
     local x = 2
-    local row = 2
+    local row = catRow1
 
     for _, cat in ipairs(categories) do
         local catWidth = #cat + 2
         -- Wrap to next row if needed
-        if x + catWidth > monitorWidth - 1 and row == 2 then
+        if x + catWidth > monitorWidth - 1 and row == catRow1 then
             x = 2
-            row = 3
+            row = catRow2
         end
 
         if currentCategory == cat then
@@ -388,13 +431,13 @@ local function drawCategories()
 
     -- Fill rest of lines
     monitor.setBackgroundColor(COLORS.categoryBg)
-    if row == 2 then
-        monitor.setCursorPos(x, 2)
+    if row == catRow1 then
+        monitor.setCursorPos(x, catRow1)
         monitor.write(string.rep(" ", monitorWidth - x + 1))
-        monitor.setCursorPos(1, 3)
+        monitor.setCursorPos(1, catRow2)
         monitor.write(string.rep(" ", monitorWidth))
     else
-        monitor.setCursorPos(x, 3)
+        monitor.setCursorPos(x, catRow2)
         monitor.write(string.rep(" ", monitorWidth - x + 1))
     end
 end
@@ -402,31 +445,37 @@ end
 local function drawItemList()
     monitor.setBackgroundColor(COLORS.listBg)
 
-    -- Header row
+    -- Header row (row 2)
     monitor.setTextColor(COLORS.listHighlight)
-    monitor.setCursorPos(1, 5)
+    monitor.setCursorPos(1, 2)
     monitor.clearLine()
-    monitor.setCursorPos(3, 5)
+    monitor.setCursorPos(3, 2)
     monitor.write("Item Name")
-    monitor.setCursorPos(monitorWidth - 12, 5)
+    monitor.setCursorPos(monitorWidth - 12, 2)
     monitor.write("Count")
 
-    -- Separator
-    monitor.setCursorPos(1, 6)
+    -- Separator (row 3)
+    monitor.setCursorPos(1, 3)
     monitor.setTextColor(COLORS.listItemAlt)
     monitor.write(string.rep("-", monitorWidth))
 
-    -- Items
-    local startIdx = (currentPage - 1) * ITEMS_PER_PAGE + 1
-    local endIdx = math.min(startIdx + ITEMS_PER_PAGE - 1, #filteredItems)
+    -- Calculate available rows for items (row 4 to monitorHeight - 5)
+    local itemStartRow = 4
+    local itemEndRow = monitorHeight - 5
+    local visibleItems = itemEndRow - itemStartRow + 1
 
-    for i = 7, 6 + ITEMS_PER_PAGE do
+    -- Items
+    local startIdx = (currentPage - 1) * visibleItems + 1
+    local endIdx = math.min(startIdx + visibleItems - 1, #filteredItems)
+
+    -- Clear item area
+    for i = itemStartRow, itemEndRow do
         monitor.setCursorPos(1, i)
         monitor.setBackgroundColor(COLORS.listBg)
         monitor.clearLine()
     end
 
-    local row = 7
+    local row = itemStartRow
     for i = startIdx, endIdx do
         local item = filteredItems[i]
         if item then
@@ -450,6 +499,12 @@ local function drawItemList()
             row = row + 1
         end
     end
+
+    -- Update total pages based on visible items
+    totalPages = math.max(1, math.ceil(#filteredItems / visibleItems))
+    if currentPage > totalPages then
+        currentPage = totalPages
+    end
 end
 
 local function drawFooter()
@@ -457,34 +512,7 @@ local function drawFooter()
     local footerY = monitorHeight - 1
     local statusY = monitorHeight
 
-    -- Footer bar with page info and nav
-    monitor.setBackgroundColor(COLORS.footer)
-    monitor.setTextColor(COLORS.footerText)
-    monitor.setCursorPos(1, footerY)
-    monitor.clearLine()
-
-    -- Page info
-    monitor.setCursorPos(3, footerY)
-    monitor.write("Page " .. currentPage .. "/" .. totalPages)
-
-    -- Item count
-    monitor.setCursorPos(20, footerY)
-    monitor.write("Items: " .. #filteredItems)
-
-    -- Navigation buttons
-    if currentPage > 1 then
-        monitor.setBackgroundColor(COLORS.button)
-        monitor.setCursorPos(monitorWidth - 20, footerY)
-        monitor.write(" < PREV ")
-    end
-
-    if currentPage < totalPages then
-        monitor.setBackgroundColor(COLORS.button)
-        monitor.setCursorPos(monitorWidth - 10, footerY)
-        monitor.write(" NEXT > ")
-    end
-
-    -- Search box row
+    -- Search box row with Refresh button
     monitor.setBackgroundColor(COLORS.header)
     monitor.setTextColor(COLORS.headerText)
     monitor.setCursorPos(1, searchY)
@@ -500,6 +528,35 @@ local function drawFooter()
         displaySearch = string.sub(displaySearch, 1, searchBoxWidth - 2)
     end
     monitor.write("[" .. displaySearch .. string.rep(" ", searchBoxWidth - 2 - #displaySearch) .. "]")
+
+    -- Refresh button on search row
+    monitor.setBackgroundColor(COLORS.button)
+    monitor.setTextColor(COLORS.buttonText)
+    monitor.setCursorPos(monitorWidth - 10, searchY)
+    monitor.write(" REFRESH ")
+
+    -- Footer bar with page info and nav
+    monitor.setBackgroundColor(COLORS.footer)
+    monitor.setTextColor(COLORS.footerText)
+    monitor.setCursorPos(1, footerY)
+    monitor.clearLine()
+
+    -- Page info
+    monitor.setCursorPos(3, footerY)
+    monitor.write("Page " .. currentPage .. "/" .. totalPages)
+
+    -- Navigation buttons
+    if currentPage > 1 then
+        monitor.setBackgroundColor(COLORS.button)
+        monitor.setCursorPos(monitorWidth - 20, footerY)
+        monitor.write(" < PREV ")
+    end
+
+    if currentPage < totalPages then
+        monitor.setBackgroundColor(COLORS.button)
+        monitor.setCursorPos(monitorWidth - 10, footerY)
+        monitor.write(" NEXT > ")
+    end
 
     -- Status message row (bottom)
     monitor.setBackgroundColor(COLORS.bg)
@@ -526,16 +583,19 @@ end
 -- TOUCH HANDLING
 --============================================
 local function getCategoryAtPos(x, y)
+    local catRow1 = monitorHeight - 4
+    local catRow2 = monitorHeight - 3
+
     local categories = getCategoryList()
     local posX = 2
-    local row = 2
+    local row = catRow1
 
     for _, cat in ipairs(categories) do
         local catWidth = #cat + 2
         -- Wrap to next row if needed
-        if posX + catWidth > monitorWidth - 1 and row == 2 then
+        if posX + catWidth > monitorWidth - 1 and row == catRow1 then
             posX = 2
-            row = 3
+            row = catRow2
         end
 
         if y == row and x >= posX and x < posX + catWidth then
@@ -547,11 +607,15 @@ local function getCategoryAtPos(x, y)
 end
 
 local function getItemAtPos(y)
-    if y < 7 or y > 6 + ITEMS_PER_PAGE then
+    local itemStartRow = 4
+    local itemEndRow = monitorHeight - 5
+    local visibleItems = itemEndRow - itemStartRow + 1
+
+    if y < itemStartRow or y > itemEndRow then
         return nil
     end
 
-    local idx = (currentPage - 1) * ITEMS_PER_PAGE + (y - 6)
+    local idx = (currentPage - 1) * visibleItems + (y - itemStartRow + 1)
     if idx <= #filteredItems then
         return filteredItems[idx]
     end
@@ -559,6 +623,8 @@ local function getItemAtPos(y)
 end
 
 local function handleTouch(x, y)
+    local catRow1 = monitorHeight - 4
+    local catRow2 = monitorHeight - 3
     local searchY = monitorHeight - 2
     local footerY = monitorHeight - 1
 
@@ -571,8 +637,8 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Refresh button (row 1, right side)
-    if y == 1 and x >= monitorWidth - 10 then
+    -- Refresh button (on search row, right side)
+    if y == searchY and x >= monitorWidth - 10 then
         statusMessage = "Refreshing inventory..."
         statusColor = COLORS.listHighlight
         drawUI()
@@ -584,8 +650,8 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Category buttons (rows 2 and 3)
-    if y == 2 or y == 3 then
+    -- Category buttons (bottom rows)
+    if y == catRow1 or y == catRow2 then
         local cat = getCategoryAtPos(x, y)
         if cat then
             currentCategory = cat
@@ -596,7 +662,7 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Item list (rows 7+)
+    -- Item list (rows 4 to monitorHeight - 5)
     local item = getItemAtPos(y)
     if item then
         statusMessage = "Retrieving " .. item.displayName .. "..."
