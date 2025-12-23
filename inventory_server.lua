@@ -388,14 +388,18 @@ local function sortInputChest()
     local movedAny = false
 
     for slot, item in pairs(items) do
-        local targetChest, targetSlot, space = findStorageSlot(item.name)
-
-        if targetChest and space > 0 then
-            local moveOk, moved = pcall(function()
-                return inputChest.pushItems(targetChest, slot, space, targetSlot)
-            end)
-            if moveOk and moved and moved > 0 then
-                movedAny = true
+        -- Try to push to any storage chest - let CC:Tweaked find a valid slot
+        local moved = 0
+        for chestName, chest in pairs(storageChests) do
+            if moved == 0 or moved < item.count then
+                local moveOk, result = pcall(function()
+                    -- Don't specify target slot - let it find available space automatically
+                    return inputChest.pushItems(chestName, slot)
+                end)
+                if moveOk and result and result > 0 then
+                    moved = moved + result
+                    movedAny = true
+                end
             end
         end
     end
