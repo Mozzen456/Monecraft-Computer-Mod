@@ -1,20 +1,19 @@
--- Startup file for Mining Turtle
--- Automatically runs the miner when turtle boots
--- Put this file on the turtle as "startup" (no .lua)
+-- Startup file for Inventory Management Computer
+-- Automatically runs the inventory server when computer boots
 --
--- To install:
---   1. Save miner as "selective_miner"
---   2. Save this as "startup"
---   3. Turtle will auto-run on boot/chunk load
+-- To install on your inventory computer:
+--   1. Copy inventory_server.lua to the computer
+--   2. Rename this file to "startup" (no extension)
+--   3. Computer will auto-run on boot
 
--- Wait a moment for the world to load
+-- Wait for peripherals to initialize
 sleep(2)
 
--- Check if miner exists
-if fs.exists("selective_miner") then
-    print("Auto-starting miner...")
-    shell.run("selective_miner")
+-- Check if inventory server exists
+if fs.exists("inventory_server") or fs.exists("inventory_server.lua") then
+    print("Starting Inventory Management System...")
+    shell.run("inventory_server")
 else
-    print("Miner not found!")
-    print("Please install 'selective_miner'")
+    print("Inventory server not found!")
+    print("Please install 'inventory_server.lua'")
 end
