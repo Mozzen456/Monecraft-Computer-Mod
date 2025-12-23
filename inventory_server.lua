@@ -8,9 +8,9 @@ local OUTPUT_CHEST = "minecraft:chest_20"  -- Set this to your output chest's pe
 local INPUT_CHEST = "minecraft:chest_8"   -- Set this to your input/dump chest's peripheral name
 local ITEMS_PER_PAGE = 14                  -- Number of items shown per page (legacy, now auto-calculated)
 local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
-local MONITOR_SCALE = 1.0                  -- Text scale: 0.5 (smallest) to 5.0 (largest). For 3x5 monitor try 0.5-1.0
+local MONITOR_SCALE = 0.5                  -- Text scale: 0.5 (smallest) to 5.0 (largest). For 3x5 monitor try 0.5-1.0
 local SCALE_OPTIONS = {0.5, 1.0, 1.5, 2.0} -- Available scale options for the scale button
-local currentScaleIndex = 2                -- Index into SCALE_OPTIONS (1.0 by default)
+local currentScaleIndex = 1                -- Index into SCALE_OPTIONS (0.5 by default)
 local FURNACE_AUTO_COLLECT = true          -- Automatically collect finished items from furnaces
 local FURNACE_OUTPUT_SLOT = 3              -- Furnace output slot (slot 3 in vanilla furnaces)
 
