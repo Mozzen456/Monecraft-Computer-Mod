@@ -8,6 +8,7 @@ local OUTPUT_CHEST = "minecraft:chest_20"  -- Set this to your output chest's pe
 local INPUT_CHEST = "minecraft:chest_8"   -- Set this to your input/dump chest's peripheral name
 local ITEMS_PER_PAGE = 14                  -- Number of items shown per page (legacy, now auto-calculated)
 local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
+local FULL_RESCAN_INTERVAL = 10            -- Seconds between full inventory rescans
 local MONITOR_SCALE = 0.5                  -- Text scale: 0.5 (smallest) to 5.0 (largest). For 3x5 monitor try 0.5-1.0
 local SCALE_OPTIONS = {0.5, 1.0, 1.5, 2.0} -- Available scale options for the scale button
 local currentScaleIndex = 1                -- Index into SCALE_OPTIONS (0.5 by default)
@@ -250,11 +251,45 @@ local function rescanPeripherals()
         end
     end
 
+    -- Remove disconnected storage chests
+    for name, _ in pairs(storageChests) do
+        if not allPeripherals[name] then
+            storageChests[name] = nil
+        end
+    end
+
+    -- Remove disconnected furnaces
+    for name, _ in pairs(furnaces) do
+        if not allPeripherals[name] then
+            furnaces[name] = nil
+        end
+    end
+
+    -- Check output/input chests
+    if outputChest and not allPeripherals[OUTPUT_CHEST] then
+        outputChest = nil
+    end
+    if inputChest and not allPeripherals[INPUT_CHEST] then
+        inputChest = nil
+    end
+
     -- Check for new peripherals
     for name, _ in pairs(allPeripherals) do
         -- Skip if already known
         if storageChests[name] or furnaces[name] or name == OUTPUT_CHEST or name == INPUT_CHEST then
-            -- Already tracked
+            -- Already tracked, but refresh the wrap
+            if storageChests[name] then
+                storageChests[name] = peripheral.wrap(name)
+            end
+            if furnaces[name] then
+                furnaces[name] = peripheral.wrap(name)
+            end
+            if name == OUTPUT_CHEST then
+                outputChest = peripheral.wrap(name)
+            end
+            if name == INPUT_CHEST then
+                inputChest = peripheral.wrap(name)
+            end
         else
             -- Check if it's a furnace
             local isFurnace = false
@@ -539,12 +574,25 @@ local function collectFromFurnaces()
 end
 
 local function autoSortLoop()
+    local lastFullRescan = os.clock()
+
     while true do
         sleep(AUTO_SORT_INTERVAL)
+
         local movedFromInput = sortInputChest()
         local movedFromFurnaces = collectFromFurnaces()
 
-        if movedFromInput or movedFromFurnaces then
+        -- Check if it's time for a full rescan
+        local now = os.clock()
+        local needsFullRescan = (now - lastFullRescan) >= FULL_RESCAN_INTERVAL
+
+        if movedFromInput or movedFromFurnaces or needsFullRescan then
+            if needsFullRescan then
+                -- Rescan for new/disconnected peripherals
+                rescanPeripherals()
+                lastFullRescan = now
+            end
+
             -- Refresh inventory display
             scanInventory()
             filterItems()
