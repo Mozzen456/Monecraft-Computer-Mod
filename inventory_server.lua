@@ -231,6 +231,78 @@ local function findPeripherals()
 end
 
 --============================================
+-- PERIPHERAL RESCANNING
+--============================================
+local function rescanPeripherals()
+    -- Get all peripherals on the network
+    local allPeripherals = {}
+
+    for _, name in ipairs(peripheral.getNames()) do
+        allPeripherals[name] = true
+    end
+
+    if modem and modem.getNamesRemote then
+        local ok, remotes = pcall(function() return modem.getNamesRemote() end)
+        if ok and remotes then
+            for _, name in ipairs(remotes) do
+                allPeripherals[name] = true
+            end
+        end
+    end
+
+    -- Check for new peripherals
+    for name, _ in pairs(allPeripherals) do
+        -- Skip if already known
+        if storageChests[name] or furnaces[name] or name == OUTPUT_CHEST or name == INPUT_CHEST then
+            -- Already tracked
+        else
+            -- Check if it's a furnace
+            local isFurnace = false
+            local furnaceTypes = {"minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker", "furnace", "blast_furnace", "smoker"}
+            for _, fType in ipairs(furnaceTypes) do
+                local ftOk, ftResult = pcall(function()
+                    return peripheral.hasType(name, fType)
+                end)
+                if ftOk and ftResult then
+                    isFurnace = true
+                    break
+                end
+            end
+
+            if isFurnace then
+                furnaces[name] = peripheral.wrap(name)
+            else
+                -- Check if it's an inventory
+                local hasInventory = false
+                local typeOk, typeResult = pcall(function()
+                    return peripheral.hasType(name, "inventory")
+                end)
+                if typeOk and typeResult then
+                    hasInventory = true
+                end
+
+                if not hasInventory then
+                    local p = peripheral.wrap(name)
+                    if p and type(p.list) == "function" then
+                        hasInventory = true
+                    end
+                end
+
+                if hasInventory then
+                    if name == OUTPUT_CHEST then
+                        outputChest = peripheral.wrap(name)
+                    elseif name == INPUT_CHEST then
+                        inputChest = peripheral.wrap(name)
+                    else
+                        storageChests[name] = peripheral.wrap(name)
+                    end
+                end
+            end
+        end
+    end
+end
+
+--============================================
 -- INVENTORY SCANNING
 --============================================
 local function getCategory(itemName)
@@ -252,47 +324,58 @@ local function scanInventory()
     local totalStacks = 0
     local chestCount = 0
     local uniqueItems = 0
+    local failedChests = 0
 
     for chestName, chest in pairs(storageChests) do
         chestCount = chestCount + 1
         local chestStacks = 0
-        local success, items = pcall(function() return chest.list() end)
-        if success and items then
-            for slot, item in pairs(items) do
-                totalStacks = totalStacks + 1
-                chestStacks = chestStacks + 1
-                local detail = nil
-                local ok, res = pcall(function() return chest.getItemDetail(slot) end)
-                if ok then detail = res end
 
-                local displayName = detail and detail.displayName or item.name
-                local key = item.name
+        -- Try to re-wrap the peripheral in case connection was lost
+        local freshChest = peripheral.wrap(chestName)
+        if not freshChest then
+            failedChests = failedChests + 1
+        else
+            -- Update our reference
+            storageChests[chestName] = freshChest
+            chest = freshChest
 
-                if not itemIndex[key] then
-                    itemIndex[key] = {
-                        name = item.name,
-                        displayName = displayName,
-                        total = 0,
-                        category = getCategory(item.name),
-                        locations = {}
-                    }
-                    uniqueItems = uniqueItems + 1
+            local success, items = pcall(function() return chest.list() end)
+            if success and items then
+                for slot, item in pairs(items) do
+                    totalStacks = totalStacks + 1
+                    chestStacks = chestStacks + 1
+                    local detail = nil
+                    local ok, res = pcall(function() return chest.getItemDetail(slot) end)
+                    if ok then detail = res end
+
+                    local displayName = detail and detail.displayName or item.name
+                    local key = item.name
+
+                    if not itemIndex[key] then
+                        itemIndex[key] = {
+                            name = item.name,
+                            displayName = displayName,
+                            total = 0,
+                            category = getCategory(item.name),
+                            locations = {}
+                        }
+                        uniqueItems = uniqueItems + 1
+                    end
+
+                    itemIndex[key].total = itemIndex[key].total + item.count
+                    table.insert(itemIndex[key].locations, {
+                        chest = chestName,
+                        slot = slot,
+                        count = item.count
+                    })
                 end
-
-                itemIndex[key].total = itemIndex[key].total + item.count
-                table.insert(itemIndex[key].locations, {
-                    chest = chestName,
-                    slot = slot,
-                    count = item.count
-                })
+            else
+                failedChests = failedChests + 1
             end
-        end
-        if chestStacks > 0 then
-            print("  " .. chestName .. ": " .. chestStacks .. " stacks")
         end
     end
 
-    print("Scanned " .. chestCount .. " chests")
+    print("Scanned " .. chestCount .. " chests (" .. failedChests .. " failed)")
     print("Found " .. totalStacks .. " stacks, " .. uniqueItems .. " unique items")
 end
 
@@ -757,12 +840,14 @@ local function handleTouch(x, y)
 
     -- Refresh button (on search row, right side)
     if y == searchY and x >= monitorWidth - 10 then
-        statusMessage = "Refreshing inventory..."
+        statusMessage = "Refreshing..."
         statusColor = COLORS.listHighlight
         drawUI()
+        -- Rescan for new peripherals
+        rescanPeripherals()
         scanInventory()
         filterItems()
-        statusMessage = "Inventory refreshed!"
+        statusMessage = "Refreshed! Found " .. #filteredItems .. " items"
         statusColor = COLORS.success
         drawUI()
         return
