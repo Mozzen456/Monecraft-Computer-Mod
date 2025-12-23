@@ -307,11 +307,12 @@ end
 local function findStorageSlot(itemName)
     -- First, try to find existing stacks of the same item
     for chestName, chest in pairs(storageChests) do
-        local items = chest.list()
-        if items then
+        local ok, items = pcall(function() return chest.list() end)
+        if ok and items then
             for slot, item in pairs(items) do
                 if item.name == itemName then
-                    local limit = chest.getItemLimit(slot)
+                    local limitOk, limit = pcall(function() return chest.getItemLimit(slot) end)
+                    if not limitOk or not limit then limit = 64 end
                     if item.count < limit then
                         return chestName, slot, limit - item.count
                     end
@@ -322,11 +323,13 @@ local function findStorageSlot(itemName)
 
     -- If no existing stack, find an empty slot
     for chestName, chest in pairs(storageChests) do
-        local size = chest.size()
-        local items = chest.list()
-        for slot = 1, size do
-            if not items[slot] then
-                return chestName, slot, 64
+        local ok, size = pcall(function() return chest.size() end)
+        if ok and size then
+            local items = chest.list() or {}
+            for slot = 1, size do
+                if not items[slot] then
+                    return chestName, slot, 64
+                end
             end
         end
     end
