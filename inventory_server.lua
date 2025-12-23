@@ -6,8 +6,11 @@
 --============================================
 local OUTPUT_CHEST = "minecraft:chest_20"  -- Set this to your output chest's peripheral name
 local INPUT_CHEST = "minecraft:chest_8"   -- Set this to your input/dump chest's peripheral name
-local ITEMS_PER_PAGE = 14                  -- Number of items shown per page
+local ITEMS_PER_PAGE = 14                  -- Number of items shown per page (legacy, now auto-calculated)
 local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
+local MONITOR_SCALE = 1.0                  -- Text scale: 0.5 (smallest) to 5.0 (largest). For 3x5 monitor try 0.5-1.0
+local SCALE_OPTIONS = {0.5, 1.0, 1.5, 2.0} -- Available scale options for the scale button
+local currentScaleIndex = 2                -- Index into SCALE_OPTIONS (1.0 by default)
 
 --============================================
 -- CATEGORY DEFINITIONS
@@ -78,6 +81,16 @@ local statusColor = COLORS.success
 -- Forward declaration for functions called before definition
 local drawUI
 
+local function cycleScale()
+    currentScaleIndex = currentScaleIndex + 1
+    if currentScaleIndex > #SCALE_OPTIONS then
+        currentScaleIndex = 1
+    end
+    MONITOR_SCALE = SCALE_OPTIONS[currentScaleIndex]
+    monitor.setTextScale(MONITOR_SCALE)
+    monitorWidth, monitorHeight = monitor.getSize()
+end
+
 --============================================
 -- INITIALIZATION
 --============================================
@@ -93,9 +106,9 @@ local function findPeripherals()
         error("Please use an Advanced Monitor for touchscreen support.")
     end
 
+    monitor.setTextScale(MONITOR_SCALE)
     monitorWidth, monitorHeight = monitor.getSize()
-    monitor.setTextScale(0.5)
-    monitorWidth, monitorHeight = monitor.getSize()
+    print("Monitor size: " .. monitorWidth .. "x" .. monitorHeight .. " (scale " .. MONITOR_SCALE .. ")")
 
     -- Find wired modem for network access
     local modemName = nil
@@ -288,6 +301,8 @@ end
 --============================================
 -- ITEM RETRIEVAL
 --============================================
+local selectedItem = nil  -- Currently selected item for quantity selection
+
 local function retrieveItem(item, requestedCount)
     if not outputChest then
         statusMessage = "No output chest configured!"
@@ -295,7 +310,8 @@ local function retrieveItem(item, requestedCount)
         return false
     end
 
-    local remaining = math.min(requestedCount, 64)
+    -- No cap - transfer as many as requested (output chest slots will fill naturally)
+    local remaining = requestedCount
     local transferred = 0
 
     for _, loc in ipairs(item.locations) do
@@ -303,8 +319,10 @@ local function retrieveItem(item, requestedCount)
 
         local chest = storageChests[loc.chest]
         if chest then
-            local moved = chest.pushItems(OUTPUT_CHEST, loc.slot, remaining)
-            if moved and moved > 0 then
+            local moveOk, moved = pcall(function()
+                return chest.pushItems(OUTPUT_CHEST, loc.slot, remaining)
+            end)
+            if moveOk and moved and moved > 0 then
                 transferred = transferred + moved
                 remaining = remaining - moved
             end
@@ -411,8 +429,16 @@ local function drawHeader()
     monitor.setCursorPos(2, 1)
     monitor.write("INVENTORY SYSTEM")
 
+    -- Scale button
+    monitor.setBackgroundColor(COLORS.button)
+    monitor.setTextColor(COLORS.buttonText)
+    monitor.setCursorPos(monitorWidth - 22, 1)
+    monitor.write(" " .. MONITOR_SCALE .. "x ")
+
     -- Item count on header
-    monitor.setCursorPos(monitorWidth - 15, 1)
+    monitor.setBackgroundColor(COLORS.header)
+    monitor.setTextColor(COLORS.headerText)
+    monitor.setCursorPos(monitorWidth - 14, 1)
     monitor.write("Items: " .. #filteredItems)
 end
 
@@ -564,34 +590,63 @@ local function drawFooter()
     monitor.setCursorPos(monitorWidth - 10, searchY)
     monitor.write(" REFRESH ")
 
-    -- Footer bar with page info and nav
+    -- Footer bar with page info and nav OR quantity selection
     monitor.setBackgroundColor(COLORS.footer)
     monitor.setTextColor(COLORS.footerText)
     monitor.setCursorPos(1, footerY)
     monitor.clearLine()
 
-    -- Page info
-    monitor.setCursorPos(3, footerY)
-    monitor.write("Page " .. currentPage .. "/" .. totalPages)
+    if selectedItem then
+        -- Show quantity selection buttons
+        monitor.setCursorPos(2, footerY)
+        monitor.write("Get: ")
 
-    -- Navigation buttons
-    if currentPage > 1 then
         monitor.setBackgroundColor(COLORS.button)
-        monitor.setCursorPos(monitorWidth - 20, footerY)
-        monitor.write(" < PREV ")
-    end
+        monitor.setTextColor(COLORS.buttonText)
+        monitor.setCursorPos(8, footerY)
+        monitor.write(" 1 ")
+        monitor.setCursorPos(13, footerY)
+        monitor.write(" 16 ")
+        monitor.setCursorPos(19, footerY)
+        monitor.write(" 64 ")
+        monitor.setCursorPos(25, footerY)
+        monitor.write(" ALL ")
 
-    if currentPage < totalPages then
-        monitor.setBackgroundColor(COLORS.button)
+        monitor.setBackgroundColor(COLORS.error)
         monitor.setCursorPos(monitorWidth - 10, footerY)
-        monitor.write(" NEXT > ")
+        monitor.write(" CANCEL ")
+    else
+        -- Page info
+        monitor.setCursorPos(3, footerY)
+        monitor.write("Page " .. currentPage .. "/" .. totalPages)
+
+        -- Navigation buttons
+        if currentPage > 1 then
+            monitor.setBackgroundColor(COLORS.button)
+            monitor.setCursorPos(monitorWidth - 20, footerY)
+            monitor.write(" < PREV ")
+        end
+
+        if currentPage < totalPages then
+            monitor.setBackgroundColor(COLORS.button)
+            monitor.setCursorPos(monitorWidth - 10, footerY)
+            monitor.write(" NEXT > ")
+        end
     end
 
     -- Status message row (bottom)
     monitor.setBackgroundColor(COLORS.bg)
     monitor.setCursorPos(1, statusY)
     monitor.clearLine()
-    if statusMessage ~= "" then
+    if selectedItem then
+        monitor.setTextColor(COLORS.listHighlight)
+        monitor.setCursorPos(3, statusY)
+        local name = selectedItem.displayName
+        if #name > monitorWidth - 20 then
+            name = string.sub(name, 1, monitorWidth - 23) .. "..."
+        end
+        monitor.write("Selected: " .. name .. " (" .. selectedItem.total .. ")")
+    elseif statusMessage ~= "" then
         monitor.setTextColor(statusColor)
         monitor.setCursorPos(3, statusY)
         monitor.write(statusMessage)
@@ -657,8 +712,52 @@ local function handleTouch(x, y)
     local searchY = monitorHeight - 2
     local footerY = monitorHeight - 1
 
+    -- Handle quantity selection if item is selected
+    if selectedItem and y == footerY then
+        -- Quantity buttons: [1] at 8-10, [16] at 13-16, [64] at 19-22, [ALL] at 25-29
+        if x >= 8 and x <= 10 then
+            retrieveItem(selectedItem, 1)
+            selectedItem = nil
+            drawUI()
+            return
+        elseif x >= 13 and x <= 16 then
+            retrieveItem(selectedItem, 16)
+            selectedItem = nil
+            drawUI()
+            return
+        elseif x >= 19 and x <= 22 then
+            retrieveItem(selectedItem, 64)
+            selectedItem = nil
+            drawUI()
+            return
+        elseif x >= 25 and x <= 29 then
+            retrieveItem(selectedItem, selectedItem.total)
+            selectedItem = nil
+            drawUI()
+            return
+        elseif x >= monitorWidth - 10 then
+            -- Cancel button
+            selectedItem = nil
+            statusMessage = "Cancelled"
+            statusColor = COLORS.listItemAlt
+            drawUI()
+            return
+        end
+    end
+
+    -- Scale button (row 1, near right side)
+    if y == 1 and x >= monitorWidth - 22 and x <= monitorWidth - 17 then
+        selectedItem = nil
+        cycleScale()
+        statusMessage = "Scale: " .. MONITOR_SCALE .. "x"
+        statusColor = COLORS.success
+        drawUI()
+        return
+    end
+
     -- Search box click (bottom area, x 10-35)
     if y == searchY and x >= 10 and x <= 35 then
+        selectedItem = nil
         isSearching = true
         statusMessage = "Type to search, Enter to confirm, Esc to cancel"
         statusColor = COLORS.listHighlight
@@ -668,6 +767,7 @@ local function handleTouch(x, y)
 
     -- Refresh button (on search row, right side)
     if y == searchY and x >= monitorWidth - 10 then
+        selectedItem = nil
         statusMessage = "Refreshing inventory..."
         statusColor = COLORS.listHighlight
         drawUI()
@@ -683,6 +783,7 @@ local function handleTouch(x, y)
     if y == catRow1 or y == catRow2 then
         local cat = getCategoryAtPos(x, y)
         if cat then
+            selectedItem = nil
             currentCategory = cat
             currentPage = 1
             filterItems()
@@ -694,26 +795,31 @@ local function handleTouch(x, y)
     -- Item list (rows 4 to monitorHeight - 5)
     local item = getItemAtPos(y)
     if item then
-        statusMessage = "Retrieving " .. item.displayName .. "..."
-        statusColor = COLORS.listHighlight
-        drawUI()
-        retrieveItem(item, 64)
+        -- Select the item and show quantity options
+        selectedItem = item
+        statusMessage = ""
         drawUI()
         return
     end
 
-    -- Previous page
-    if y == footerY and x >= monitorWidth - 20 and x < monitorWidth - 10 and currentPage > 1 then
+    -- Previous page (only when no item selected)
+    if not selectedItem and y == footerY and x >= monitorWidth - 20 and x < monitorWidth - 10 and currentPage > 1 then
         currentPage = currentPage - 1
         drawUI()
         return
     end
 
-    -- Next page
-    if y == footerY and x >= monitorWidth - 10 and currentPage < totalPages then
+    -- Next page (only when no item selected)
+    if not selectedItem and y == footerY and x >= monitorWidth - 10 and currentPage < totalPages then
         currentPage = currentPage + 1
         drawUI()
         return
+    end
+
+    -- Clicking elsewhere clears selection
+    if selectedItem then
+        selectedItem = nil
+        drawUI()
     end
 end
 
