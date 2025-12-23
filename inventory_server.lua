@@ -4,8 +4,8 @@
 --============================================
 -- CONFIGURATION
 --============================================
-local OUTPUT_CHEST = "minecraft:chest_0"  -- Set this to your output chest's peripheral name
-local INPUT_CHEST = "minecraft:chest_1"   -- Set this to your input/dump chest's peripheral name
+local OUTPUT_CHEST = minecraft:chest_9  -- Set this to your output chest's peripheral name
+local INPUT_CHEST = minecraft:chest_8   -- Set this to your input/dump chest's peripheral name
 local ITEMS_PER_PAGE = 14                  -- Number of items shown per page
 local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
 
