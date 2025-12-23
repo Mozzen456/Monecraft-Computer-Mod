@@ -11,6 +11,8 @@ local AUTO_SORT_INTERVAL = 2               -- Seconds between auto-sort checks
 local MONITOR_SCALE = 1.0                  -- Text scale: 0.5 (smallest) to 5.0 (largest). For 3x5 monitor try 0.5-1.0
 local SCALE_OPTIONS = {0.5, 1.0, 1.5, 2.0} -- Available scale options for the scale button
 local currentScaleIndex = 2                -- Index into SCALE_OPTIONS (1.0 by default)
+local FURNACE_AUTO_COLLECT = true          -- Automatically collect finished items from furnaces
+local FURNACE_OUTPUT_SLOT = 3              -- Furnace output slot (slot 3 in vanilla furnaces)
 
 --============================================
 -- CATEGORY DEFINITIONS
@@ -20,8 +22,8 @@ local CATEGORIES = {
     {name = "Weapons", keywords = {"sword", "bow", "crossbow", "trident", "shield", "dagger", "rapier", "katana", "staff", "wand", "gun", "rifle", "blade", "cleaver", "mace", "spear", "halberd", "battleaxe", "launcher"}},
     {name = "Armor", keywords = {"helmet", "chestplate", "leggings", "boots", "cap", "tunic", "pants", "armor", "cuirass", "greaves", "sabatons", "coif", "chainmail", "plate"}},
     {name = "Blocks", keywords = {"stone", "dirt", "grass", "wood", "plank", "log", "brick", "glass", "sand", "gravel", "concrete", "terracotta", "wool", "slab", "stairs", "fence", "wall", "door", "trapdoor", "tile", "panel", "beam", "column", "pillar", "frame", "casing", "hull"}},
-    {name = "Food", keywords = {"beef", "pork", "chicken", "mutton", "rabbit", "cod", "salmon", "bread", "apple", "carrot", "potato", "beetroot", "melon", "cookie", "cake", "pie", "stew", "soup", "golden_apple", "cooked", "raw_", "food", "meal", "snack", "fruit", "vegetable", "meat", "fish", "berry", "cheese", "sandwich", "toast", "jerky", "sushi"}},
-    {name = "Ores", keywords = {"ore", "raw_iron", "raw_gold", "raw_copper", "ingot", "nugget", "diamond", "emerald", "gold", "iron", "copper", "coal", "lapis", "redstone", "netherite", "amethyst", "tin", "lead", "silver", "nickel", "aluminum", "aluminium", "zinc", "uranium", "titanium", "tungsten", "platinum", "osmium", "iridium", "certus", "quartz", "ruby", "sapphire", "peridot"}},
+    {name = "Ores", keywords = {"ore", "raw_", "ingot", "nugget", "diamond", "emerald", "gold", "iron", "copper", "coal", "lapis", "redstone", "netherite", "amethyst", "tin", "lead", "silver", "nickel", "aluminum", "aluminium", "zinc", "uranium", "titanium", "tungsten", "platinum", "osmium", "iridium", "certus", "quartz", "ruby", "sapphire", "peridot"}},
+    {name = "Food", keywords = {"beef", "pork", "chicken", "mutton", "rabbit", "cod", "salmon", "bread", "apple", "carrot", "potato", "beetroot", "melon", "cookie", "cake", "pie", "stew", "soup", "golden_apple", "cooked_", "food", "meal", "snack", "fruit", "vegetable", "meat", "fish", "berry", "cheese", "sandwich", "toast", "jerky", "sushi"}},
     {name = "Materials", keywords = {"dust", "gear", "plate", "rod", "wire", "cable", "nugget", "chunk", "shard", "fragment", "essence", "crystal", "gem", "pearl", "alloy", "blend", "compound", "circuit", "chip", "processor", "component", "module", "coil", "casing"}},
     {name = "Machines", keywords = {"machine", "furnace", "generator", "engine", "crusher", "grinder", "pulverizer", "smelter", "centrifuge", "press", "compressor", "extractor", "fabricator", "assembler", "inscriber", "interface", "terminal", "controller", "core", "reactor", "turbine", "solar", "battery", "capacitor", "cell", "tank", "pump", "pipe", "conduit", "duct", "cable", "quarry", "miner", "laser"}},
     {name = "Redstone", keywords = {"repeater", "comparator", "piston", "lever", "button", "pressure_plate", "tripwire", "observer", "dropper", "dispenser", "hopper", "rail", "minecart", "detector", "daylight", "target", "sculk"}},
@@ -65,6 +67,7 @@ local COLORS = {
 local monitor = nil
 local modem = nil
 local storageChests = {}   -- {name -> peripheral}
+local furnaces = {}        -- {name -> peripheral} for auto-collection
 local outputChest = nil
 local inputChest = nil
 local itemIndex = {}       -- {itemName -> {displayName, total, locations=[{chest, slot, count}]}}
@@ -172,7 +175,23 @@ local function findPeripherals()
             end
         end
 
-        if hasInventory then
+        -- Check if it's a furnace type
+        local isFurnace = false
+        local furnaceTypes = {"minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker", "furnace", "blast_furnace", "smoker"}
+        for _, fType in ipairs(furnaceTypes) do
+            local ftOk, ftResult = pcall(function()
+                return peripheral.hasType(name, fType)
+            end)
+            if ftOk and ftResult then
+                isFurnace = true
+                break
+            end
+        end
+
+        if isFurnace then
+            furnaces[name] = peripheral.wrap(name)
+            print("  Furnace: " .. name)
+        elseif hasInventory then
             if name == OUTPUT_CHEST then
                 outputChest = peripheral.wrap(name)
                 print("  Output: " .. name)
@@ -203,6 +222,12 @@ local function findPeripherals()
     local chestCount = 0
     for _ in pairs(storageChests) do chestCount = chestCount + 1 end
     print("Found " .. chestCount .. " storage chests")
+
+    local furnaceCount = 0
+    for _ in pairs(furnaces) do furnaceCount = furnaceCount + 1 end
+    if furnaceCount > 0 then
+        print("Found " .. furnaceCount .. " furnaces (auto-collect enabled)")
+    end
 end
 
 --============================================
@@ -301,8 +326,6 @@ end
 --============================================
 -- ITEM RETRIEVAL
 --============================================
-local selectedItem = nil  -- Currently selected item for quantity selection
-
 local function retrieveItem(item, requestedCount)
     if not outputChest then
         statusMessage = "No output chest configured!"
@@ -310,8 +333,8 @@ local function retrieveItem(item, requestedCount)
         return false
     end
 
-    -- No cap - transfer as many as requested (output chest slots will fill naturally)
-    local remaining = requestedCount
+    -- Cap at 64 (one stack) for extraction
+    local remaining = math.min(requestedCount, 64)
     local transferred = 0
 
     for _, loc in ipairs(item.locations) do
@@ -407,11 +430,38 @@ local function sortInputChest()
     return movedAny
 end
 
+local function collectFromFurnaces()
+    if not FURNACE_AUTO_COLLECT then return false end
+
+    local movedAny = false
+
+    for furnaceName, furnace in pairs(furnaces) do
+        -- Check if there's an item in the output slot
+        local ok, items = pcall(function() return furnace.list() end)
+        if ok and items and items[FURNACE_OUTPUT_SLOT] then
+            -- Try to push the output to any storage chest
+            for chestName, chest in pairs(storageChests) do
+                local moveOk, moved = pcall(function()
+                    return furnace.pushItems(chestName, FURNACE_OUTPUT_SLOT)
+                end)
+                if moveOk and moved and moved > 0 then
+                    movedAny = true
+                    break  -- Move to next furnace once this one's output is moved
+                end
+            end
+        end
+    end
+
+    return movedAny
+end
+
 local function autoSortLoop()
     while true do
         sleep(AUTO_SORT_INTERVAL)
-        local moved = sortInputChest()
-        if moved then
+        local movedFromInput = sortInputChest()
+        local movedFromFurnaces = collectFromFurnaces()
+
+        if movedFromInput or movedFromFurnaces then
             -- Refresh inventory display
             scanInventory()
             filterItems()
@@ -594,63 +644,34 @@ local function drawFooter()
     monitor.setCursorPos(monitorWidth - 10, searchY)
     monitor.write(" REFRESH ")
 
-    -- Footer bar with page info and nav OR quantity selection
+    -- Footer bar with page info and nav
     monitor.setBackgroundColor(COLORS.footer)
     monitor.setTextColor(COLORS.footerText)
     monitor.setCursorPos(1, footerY)
     monitor.clearLine()
 
-    if selectedItem then
-        -- Show quantity selection buttons
-        monitor.setCursorPos(2, footerY)
-        monitor.write("Get: ")
+    -- Page info
+    monitor.setCursorPos(3, footerY)
+    monitor.write("Page " .. currentPage .. "/" .. totalPages)
 
+    -- Navigation buttons
+    if currentPage > 1 then
         monitor.setBackgroundColor(COLORS.button)
-        monitor.setTextColor(COLORS.buttonText)
-        monitor.setCursorPos(8, footerY)
-        monitor.write(" 1 ")
-        monitor.setCursorPos(13, footerY)
-        monitor.write(" 16 ")
-        monitor.setCursorPos(19, footerY)
-        monitor.write(" 64 ")
-        monitor.setCursorPos(25, footerY)
-        monitor.write(" ALL ")
+        monitor.setCursorPos(monitorWidth - 20, footerY)
+        monitor.write(" < PREV ")
+    end
 
-        monitor.setBackgroundColor(COLORS.error)
+    if currentPage < totalPages then
+        monitor.setBackgroundColor(COLORS.button)
         monitor.setCursorPos(monitorWidth - 10, footerY)
-        monitor.write(" CANCEL ")
-    else
-        -- Page info
-        monitor.setCursorPos(3, footerY)
-        monitor.write("Page " .. currentPage .. "/" .. totalPages)
-
-        -- Navigation buttons
-        if currentPage > 1 then
-            monitor.setBackgroundColor(COLORS.button)
-            monitor.setCursorPos(monitorWidth - 20, footerY)
-            monitor.write(" < PREV ")
-        end
-
-        if currentPage < totalPages then
-            monitor.setBackgroundColor(COLORS.button)
-            monitor.setCursorPos(monitorWidth - 10, footerY)
-            monitor.write(" NEXT > ")
-        end
+        monitor.write(" NEXT > ")
     end
 
     -- Status message row (bottom)
     monitor.setBackgroundColor(COLORS.bg)
     monitor.setCursorPos(1, statusY)
     monitor.clearLine()
-    if selectedItem then
-        monitor.setTextColor(COLORS.listHighlight)
-        monitor.setCursorPos(3, statusY)
-        local name = selectedItem.displayName
-        if #name > monitorWidth - 20 then
-            name = string.sub(name, 1, monitorWidth - 23) .. "..."
-        end
-        monitor.write("Selected: " .. name .. " (" .. selectedItem.total .. ")")
-    elseif statusMessage ~= "" then
+    if statusMessage ~= "" then
         monitor.setTextColor(statusColor)
         monitor.setCursorPos(3, statusY)
         monitor.write(statusMessage)
@@ -716,42 +737,8 @@ local function handleTouch(x, y)
     local searchY = monitorHeight - 2
     local footerY = monitorHeight - 1
 
-    -- Handle quantity selection if item is selected
-    if selectedItem and y == footerY then
-        -- Quantity buttons: [1] at 8-10, [16] at 13-16, [64] at 19-22, [ALL] at 25-29
-        if x >= 8 and x <= 10 then
-            retrieveItem(selectedItem, 1)
-            selectedItem = nil
-            drawUI()
-            return
-        elseif x >= 13 and x <= 16 then
-            retrieveItem(selectedItem, 16)
-            selectedItem = nil
-            drawUI()
-            return
-        elseif x >= 19 and x <= 22 then
-            retrieveItem(selectedItem, 64)
-            selectedItem = nil
-            drawUI()
-            return
-        elseif x >= 25 and x <= 29 then
-            retrieveItem(selectedItem, selectedItem.total)
-            selectedItem = nil
-            drawUI()
-            return
-        elseif x >= monitorWidth - 10 then
-            -- Cancel button
-            selectedItem = nil
-            statusMessage = "Cancelled"
-            statusColor = COLORS.listItemAlt
-            drawUI()
-            return
-        end
-    end
-
     -- Scale button (row 1, near right side)
     if y == 1 and x >= monitorWidth - 22 and x <= monitorWidth - 17 then
-        selectedItem = nil
         cycleScale()
         statusMessage = "Scale: " .. MONITOR_SCALE .. "x"
         statusColor = COLORS.success
@@ -761,7 +748,6 @@ local function handleTouch(x, y)
 
     -- Search box click (bottom area, x 10-35)
     if y == searchY and x >= 10 and x <= 35 then
-        selectedItem = nil
         isSearching = true
         statusMessage = "Type to search, Enter to confirm, Esc to cancel"
         statusColor = COLORS.listHighlight
@@ -771,7 +757,6 @@ local function handleTouch(x, y)
 
     -- Refresh button (on search row, right side)
     if y == searchY and x >= monitorWidth - 10 then
-        selectedItem = nil
         statusMessage = "Refreshing inventory..."
         statusColor = COLORS.listHighlight
         drawUI()
@@ -787,7 +772,6 @@ local function handleTouch(x, y)
     if y == catRow1 or y == catRow2 then
         local cat = getCategoryAtPos(x, y)
         if cat then
-            selectedItem = nil
             currentCategory = cat
             currentPage = 1
             filterItems()
@@ -796,34 +780,29 @@ local function handleTouch(x, y)
         return
     end
 
-    -- Item list (rows 4 to monitorHeight - 5)
+    -- Item list (rows 4 to monitorHeight - 5) - directly extract a stack
     local item = getItemAtPos(y)
     if item then
-        -- Select the item and show quantity options
-        selectedItem = item
-        statusMessage = ""
+        statusMessage = "Retrieving " .. item.displayName .. "..."
+        statusColor = COLORS.listHighlight
+        drawUI()
+        retrieveItem(item, 64)
         drawUI()
         return
     end
 
-    -- Previous page (only when no item selected)
-    if not selectedItem and y == footerY and x >= monitorWidth - 20 and x < monitorWidth - 10 and currentPage > 1 then
+    -- Previous page
+    if y == footerY and x >= monitorWidth - 20 and x < monitorWidth - 10 and currentPage > 1 then
         currentPage = currentPage - 1
         drawUI()
         return
     end
 
-    -- Next page (only when no item selected)
-    if not selectedItem and y == footerY and x >= monitorWidth - 10 and currentPage < totalPages then
+    -- Next page
+    if y == footerY and x >= monitorWidth - 10 and currentPage < totalPages then
         currentPage = currentPage + 1
         drawUI()
         return
-    end
-
-    -- Clicking elsewhere clears selection
-    if selectedItem then
-        selectedItem = nil
-        drawUI()
     end
 end
 
