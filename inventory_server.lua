@@ -114,25 +114,41 @@ local function findPeripherals()
     -- Get all inventories (both local and networked)
     local allPeripherals = {}
 
-    -- Add local peripherals
+    -- Add all peripherals (peripheral.getNames includes networked ones in CC:Tweaked)
     for _, name in ipairs(peripheral.getNames()) do
         allPeripherals[name] = true
     end
 
-    -- Add remote peripherals from wired modem
+    -- Also try modem.getNamesRemote if available
     if modem and modem.getNamesRemote then
-        for _, name in ipairs(modem.getNamesRemote()) do
-            allPeripherals[name] = true
+        local ok, remotes = pcall(function() return modem.getNamesRemote() end)
+        if ok and remotes then
+            for _, name in ipairs(remotes) do
+                allPeripherals[name] = true
+            end
         end
     end
 
-    print("Scanning peripherals...")
+    -- Count and list all peripherals found
+    local peripheralCount = 0
+    print("All peripherals found:")
+    for name, _ in pairs(allPeripherals) do
+        peripheralCount = peripheralCount + 1
+        print("  " .. name)
+    end
+    print("Total peripherals: " .. peripheralCount)
+
+    print("")
+    print("Detecting inventories...")
     for name, _ in pairs(allPeripherals) do
         local hasInventory = false
 
-        -- Try multiple ways to detect inventory capability
-        if peripheral.hasType then
-            hasInventory = peripheral.hasType(name, "inventory")
+        -- Try peripheral.hasType first
+        local typeOk, typeResult = pcall(function()
+            return peripheral.hasType(name, "inventory")
+        end)
+        if typeOk and typeResult then
+            hasInventory = true
         end
 
         -- Fallback: try to wrap and check for list() method
@@ -146,13 +162,13 @@ local function findPeripherals()
         if hasInventory then
             if name == OUTPUT_CHEST then
                 outputChest = peripheral.wrap(name)
-                print("Output chest: " .. name)
+                print("  Output: " .. name)
             elseif name == INPUT_CHEST then
                 inputChest = peripheral.wrap(name)
-                print("Input chest: " .. name)
+                print("  Input: " .. name)
             else
                 storageChests[name] = peripheral.wrap(name)
-                print("Storage chest: " .. name)
+                print("  Storage: " .. name)
             end
         end
     end
@@ -195,15 +211,18 @@ end
 
 local function scanInventory()
     itemIndex = {}
-    local totalItems = 0
+    local totalStacks = 0
     local chestCount = 0
+    local uniqueItems = 0
 
     for chestName, chest in pairs(storageChests) do
         chestCount = chestCount + 1
+        local chestStacks = 0
         local success, items = pcall(function() return chest.list() end)
         if success and items then
             for slot, item in pairs(items) do
-                totalItems = totalItems + 1
+                totalStacks = totalStacks + 1
+                chestStacks = chestStacks + 1
                 local detail = nil
                 local ok, res = pcall(function() return chest.getItemDetail(slot) end)
                 if ok then detail = res end
@@ -219,6 +238,7 @@ local function scanInventory()
                         category = getCategory(item.name),
                         locations = {}
                     }
+                    uniqueItems = uniqueItems + 1
                 end
 
                 itemIndex[key].total = itemIndex[key].total + item.count
@@ -229,9 +249,13 @@ local function scanInventory()
                 })
             end
         end
+        if chestStacks > 0 then
+            print("  " .. chestName .. ": " .. chestStacks .. " stacks")
+        end
     end
 
-    print("Scanned " .. chestCount .. " chests, found " .. totalItems .. " item stacks")
+    print("Scanned " .. chestCount .. " chests")
+    print("Found " .. totalStacks .. " stacks, " .. uniqueItems .. " unique items")
 end
 
 local function filterItems()
@@ -340,8 +364,8 @@ end
 local function sortInputChest()
     if not inputChest then return false end
 
-    local items = inputChest.list()
-    if not items then return false end
+    local ok, items = pcall(function() return inputChest.list() end)
+    if not ok or not items then return false end
 
     local movedAny = false
 
@@ -349,8 +373,10 @@ local function sortInputChest()
         local targetChest, targetSlot, space = findStorageSlot(item.name)
 
         if targetChest and space > 0 then
-            local moved = inputChest.pushItems(targetChest, slot, space, targetSlot)
-            if moved and moved > 0 then
+            local moveOk, moved = pcall(function()
+                return inputChest.pushItems(targetChest, slot, space, targetSlot)
+            end)
+            if moveOk and moved and moved > 0 then
                 movedAny = true
             end
         end
