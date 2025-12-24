@@ -242,10 +242,20 @@ end
 
 -- ============== MOVEMENT FUNCTIONS ==============
 local function forward()
+    -- Keep trying until we move
     while not turtle.forward() do
-        turtle.dig()
-        sleep(0.1)
+        -- Dig and wait for falling gravel/sand
+        while turtle.detect() do
+            turtle.dig()
+            sleep(0.15)
+        end
         turtle.attack()
+        sleep(0.05)
+    end
+    -- Clear any gravel that fell from above
+    while turtle.detectUp() do
+        turtle.digUp()
+        sleep(0.15)
     end
 
     if facing == 0 then posX = posX + 1
@@ -257,13 +267,17 @@ end
 
 local function back()
     while not turtle.back() do
+        -- Turn around to dig
         turtle.turnLeft()
         turtle.turnLeft()
-        turtle.dig()
-        sleep(0.1)
+        while turtle.detect() do
+            turtle.dig()
+            sleep(0.15)
+        end
         turtle.attack()
         turtle.turnLeft()
         turtle.turnLeft()
+        sleep(0.05)
     end
 
     if facing == 0 then posX = posX - 1
@@ -275,18 +289,25 @@ end
 
 local function up()
     while not turtle.up() do
-        turtle.digUp()
-        sleep(0.1)
+        -- Dig and wait for falling gravel/sand
+        while turtle.detectUp() do
+            turtle.digUp()
+            sleep(0.15)
+        end
         turtle.attackUp()
+        sleep(0.05)
     end
     posY = posY + 1
 end
 
 local function down()
     while not turtle.down() do
-        turtle.digDown()
-        sleep(0.1)
+        while turtle.detectDown() do
+            turtle.digDown()
+            sleep(0.05)
+        end
         turtle.attackDown()
+        sleep(0.05)
     end
     posY = posY - 1
 end
@@ -309,10 +330,27 @@ end
 
 -- ============== MINING FUNCTIONS ==============
 local function digColumn()
-    -- Dig all blocks in current column (4 high)
-    turtle.dig()
-    turtle.digUp()
-    turtle.digDown()
+    -- Dig all blocks in current column (3 high)
+    -- Handle falling gravel/sand by digging until clear
+
+    -- Dig forward
+    while turtle.detect() do
+        turtle.dig()
+        sleep(0.15)
+    end
+
+    -- Dig up (keep digging while gravel falls)
+    while turtle.detectUp() do
+        turtle.digUp()
+        sleep(0.15)
+    end
+
+    -- Dig down
+    while turtle.detectDown() do
+        turtle.digDown()
+        sleep(0.05)
+    end
+
     blocksCleared = blocksCleared + 3
 end
 
@@ -592,17 +630,24 @@ local function mainMining()
     end
 
     print("")
-    print("Press ENTER to start, or CTRL+T to cancel...")
+    print("Press ENTER to start now, or wait 10 seconds...")
+    print("(CTRL+T to cancel)")
 
-    -- Wait for user confirmation
-    read()
+    -- Race between user input and 10 second timer
+    local function waitForEnter()
+        read()
+    end
+    local function waitForTimer()
+        for i = 10, 1, -1 do
+            term.setCursorPos(1, select(2, term.getCursorPos()) - 1)
+            term.clearLine()
+            print("Auto-starting in " .. i .. " seconds... (press ENTER)")
+            sleep(1)
+        end
+    end
 
-    print("Starting in 3...")
-    sleep(1)
-    print("2...")
-    sleep(1)
-    print("1...")
-    sleep(1)
+    parallel.waitForAny(waitForEnter, waitForTimer)
+
     print("GO!")
 
     -- Go up 1 to be in middle of 3-high area (dig up/down from there)
