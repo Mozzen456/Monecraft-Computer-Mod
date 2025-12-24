@@ -414,6 +414,13 @@ end
 
 -- ============== MAIN PROGRAM ==============
 local function mainMining()
+    -- ALWAYS reset position to 0,0,0 at start
+    posX, posY, posZ = 0, 0, 0
+    facing = 0
+    blocksCleared = 0
+    itemsKept = 0
+    recalled = false
+
     print("=================================")
     print("  SELECTIVE AREA MINER")
     print("  Area: " .. LENGTH .. "x" .. WIDTH .. "x" .. HEIGHT)
@@ -421,6 +428,12 @@ local function mainMining()
     print("  Turtle ID: " .. TURTLE_ID)
     print("  Name: " .. TURTLE_NAME)
     print("=================================")
+    print("")
+    print("POSITION CHECK:")
+    print("  - Turtle at BOTTOM RIGHT corner?")
+    print("  - Chest BEHIND turtle?")
+    print("  - Turtle facing INTO the area?")
+    print("")
 
     -- Check fuel
     local neededFuel = LENGTH * WIDTH * HEIGHT * 2
@@ -430,6 +443,20 @@ local function mainMining()
     if currentFuel < neededFuel then
         print("WARNING: Low fuel! May not complete job.")
     end
+
+    print("")
+    print("Press ENTER to start, or CTRL+T to cancel...")
+
+    -- Wait for user confirmation
+    read()
+
+    print("Starting in 3...")
+    sleep(1)
+    print("2...")
+    sleep(1)
+    print("1...")
+    sleep(1)
+    print("GO!")
 
     -- Go up 1 to be in middle of 4-high area (dig up/down from there)
     setStatus("Moving to start height")
