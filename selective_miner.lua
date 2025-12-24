@@ -1,11 +1,12 @@
 -- Selective Area Miner for ComputerCraft / CC:Tweaked
--- Clears a 50x50x4 area, drops junk, keeps valuables
+-- Clears a 50x50x3 area, drops junk, keeps valuables
 -- Reports status to monitor, returns home when done
+-- Start at BOTTOM RIGHT corner, turtle mines forward and LEFT
 
 -- ============== CONFIGURATION ==============
 local LENGTH = 50      -- X direction (forward)
-local WIDTH = 50       -- Z direction (right)
-local HEIGHT = 4       -- Y direction (up)
+local WIDTH = 50       -- Z direction (left from start)
+local HEIGHT = 3       -- Y direction (up)
 local CHANNEL = 100    -- Wireless channel (must match monitor)
 
 -- Keywords that indicate a block is an ore (NEVER drop these)
@@ -29,8 +30,7 @@ local JUNK_ITEMS = {
     -- Stone types
     ["minecraft:cobblestone"] = true,
     ["minecraft:stone"] = true,
-    ["minecraft:deepslate"] = true,
-    ["minecraft:cobbled_deepslate"] = true,
+    ["minecraft:smooth_stone"] = true,
     ["minecraft:andesite"] = true,
     ["minecraft:diorite"] = true,
     ["minecraft:granite"] = true,
@@ -39,18 +39,34 @@ local JUNK_ITEMS = {
     ["minecraft:smooth_basalt"] = true,
     ["minecraft:basalt"] = true,
     ["minecraft:blackstone"] = true,
+    -- Deepslate types (all variants)
+    ["minecraft:deepslate"] = true,
+    ["minecraft:cobbled_deepslate"] = true,
+    ["minecraft:polished_deepslate"] = true,
+    ["minecraft:deepslate_bricks"] = true,
+    ["minecraft:cracked_deepslate_bricks"] = true,
+    ["minecraft:deepslate_tiles"] = true,
+    ["minecraft:cracked_deepslate_tiles"] = true,
+    ["minecraft:chiseled_deepslate"] = true,
+    ["minecraft:infested_deepslate"] = true,
     -- Dirt types
     ["minecraft:dirt"] = true,
+    ["minecraft:coarse_dirt"] = true,
+    ["minecraft:rooted_dirt"] = true,
     ["minecraft:gravel"] = true,
     ["minecraft:sand"] = true,
     ["minecraft:red_sand"] = true,
     ["minecraft:clay"] = true,
+    ["minecraft:mud"] = true,
     ["minecraft:soul_sand"] = true,
     ["minecraft:soul_soil"] = true,
     ["minecraft:netherrack"] = true,
     -- Other common junk
     ["minecraft:flint"] = true,
     ["minecraft:mossy_cobblestone"] = true,
+    ["minecraft:mossy_stone_bricks"] = true,
+    ["minecraft:stone_bricks"] = true,
+    ["minecraft:cracked_stone_bricks"] = true,
 }
 
 -- Keywords that indicate junk (for mod support)
@@ -82,6 +98,14 @@ local recalled = false
 local itemsKept = 0
 local blocksCleared = 0
 local totalBlocks = LENGTH * WIDTH * HEIGHT
+
+-- ============== FORWARD DECLARATIONS ==============
+-- (Functions used before they're defined)
+local returnHome
+local depositItems
+local goToPosition
+local isInventoryFull
+local depositAndReturn
 
 -- ============== WIRELESS SETUP ==============
 local modem = peripheral.find("modem")
@@ -163,8 +187,10 @@ local function dropJunk()
         if item then
             if isJunk(item.name) then
                 turtle.select(slot)
-                turtle.drop()
-                droppedSlots = droppedSlots + 1
+                local dropped = turtle.dropDown()  -- Drop DOWN so items fall below
+                if dropped then
+                    droppedSlots = droppedSlots + 1
+                end
             else
                 itemsKept = itemsKept + item.count
             end
@@ -174,8 +200,34 @@ local function dropJunk()
     turtle.select(1)
 
     if droppedSlots > 0 then
-        print("Dropped junk from " .. droppedSlots .. " slots, keeping " .. itemsKept .. " items")
+        print("Dropped junk from " .. droppedSlots .. " slots")
     end
+end
+
+-- ============== FUEL MANAGEMENT ==============
+local function refuelIfNeeded()
+    local MIN_FUEL = 500
+
+    if turtle.getFuelLevel() == "unlimited" then
+        return true
+    end
+
+    if turtle.getFuelLevel() < MIN_FUEL then
+        -- Look for coal/charcoal in inventory
+        for slot = 1, 16 do
+            local item = turtle.getItemDetail(slot)
+            if item and (item.name == "minecraft:coal" or item.name == "minecraft:charcoal") then
+                turtle.select(slot)
+                turtle.refuel(16)  -- Use up to 16 coal
+                print("Refueled! Fuel: " .. turtle.getFuelLevel())
+                turtle.select(1)
+                return true
+            end
+        end
+        print("WARNING: Low fuel and no coal!")
+        return false
+    end
+    return true
 end
 
 local function getInventoryCount()
@@ -262,11 +314,6 @@ local function digColumn()
     turtle.digUp()
     turtle.digDown()
     blocksCleared = blocksCleared + 3
-
-    -- Drop junk periodically
-    if getInventoryCount() >= 14 then
-        dropJunk()
-    end
 end
 
 local function clearRow()
@@ -277,12 +324,31 @@ local function clearRow()
             blocksCleared = blocksCleared + 1
         end
 
+        -- Drop junk every 5 blocks to keep inventory clear
+        if x % 5 == 0 then
+            dropJunk()
+            refuelIfNeeded()
+
+            -- Check if inventory is still full after dropping junk
+            if isInventoryFull() then
+                depositAndReturn()
+            end
+        end
+
         -- Update status every 10 blocks
         if x % 10 == 0 then
             sendStatus()
         end
 
         if recalled then return end
+    end
+
+    -- Drop at end of each row
+    dropJunk()
+
+    -- Check again at end of row
+    if isInventoryFull() then
+        depositAndReturn()
     end
 end
 
@@ -294,28 +360,28 @@ local function clearLayer()
         if recalled then return end
 
         if z < WIDTH then
-            -- Move to next row (serpentine pattern)
+            -- Move to next row (serpentine pattern - going LEFT from start)
             if z % 2 == 1 then
-                -- At end of forward row, turn right
-                turnRight()
+                -- At end of forward row, turn left
+                turnLeft()
                 digColumn()
                 forward()
                 blocksCleared = blocksCleared + 1
-                turnRight()
+                turnLeft()
             else
-                -- At end of backward row, turn left
-                turnLeft()
+                -- At end of backward row, turn right
+                turnRight()
                 digColumn()
                 forward()
                 blocksCleared = blocksCleared + 1
-                turnLeft()
+                turnRight()
             end
         end
     end
 end
 
 -- ============== RETURN HOME ==============
-local function returnHome()
+returnHome = function()
     setStatus("Returning home")
 
     -- First, go down to Y=0
@@ -358,20 +424,28 @@ local function returnHome()
     setStatus("Home")
 end
 
-local function depositItems()
+depositItems = function()
     setStatus("Depositing items")
 
     -- Turn to face chest (behind starting position)
     turnLeft()
     turnLeft()
 
-    -- Drop all items into chest
+    -- Drop all items into chest (keep some coal for fuel)
     for slot = 1, 16 do
         local item = turtle.getItemDetail(slot)
         if item then
-            turtle.select(slot)
-            if not turtle.drop() then
-                print("Chest full or missing!")
+            -- Keep some coal for refueling
+            if item.name == "minecraft:coal" or item.name == "minecraft:charcoal" then
+                if item.count > 32 then
+                    turtle.select(slot)
+                    turtle.drop(item.count - 32)  -- Keep 32 coal
+                end
+            else
+                turtle.select(slot)
+                if not turtle.drop() then
+                    print("Chest full or missing!")
+                end
             end
         end
     end
@@ -381,6 +455,79 @@ local function depositItems()
     -- Turn back to face original direction
     turnLeft()
     turnLeft()
+end
+
+goToPosition = function(targetX, targetY, targetZ, targetFacing)
+    -- Go to Y level first
+    while posY < targetY do
+        up()
+    end
+    while posY > targetY do
+        down()
+    end
+
+    -- Go to X position
+    if posX < targetX then
+        turnToFace(0)  -- Face +X
+        while posX < targetX do
+            forward()
+        end
+    elseif posX > targetX then
+        turnToFace(2)  -- Face -X
+        while posX > targetX do
+            forward()
+        end
+    end
+
+    -- Go to Z position
+    if posZ < targetZ then
+        turnToFace(1)  -- Face +Z
+        while posZ < targetZ do
+            forward()
+        end
+    elseif posZ > targetZ then
+        turnToFace(3)  -- Face -Z
+        while posZ > targetZ do
+            forward()
+        end
+    end
+
+    -- Face the right direction
+    turnToFace(targetFacing)
+end
+
+isInventoryFull = function()
+    for slot = 1, 16 do
+        if turtle.getItemCount(slot) == 0 then
+            return false
+        end
+    end
+    return true
+end
+
+depositAndReturn = function()
+    -- Save current position
+    local savedX = posX
+    local savedY = posY
+    local savedZ = posZ
+    local savedFacing = facing
+
+    print("Inventory full! Returning to deposit...")
+    setStatus("Depositing")
+
+    -- Return home
+    returnHome()
+
+    -- Deposit items
+    depositItems()
+
+    -- Return to saved position
+    print("Returning to mining position...")
+    setStatus("Returning to mine")
+    goToPosition(savedX, savedY, savedZ, savedFacing)
+
+    print("Resuming mining!")
+    setStatus("Mining")
 end
 
 -- ============== RECALL LISTENER ==============
@@ -458,7 +605,7 @@ local function mainMining()
     sleep(1)
     print("GO!")
 
-    -- Go up 1 to be in middle of 4-high area (dig up/down from there)
+    -- Go up 1 to be in middle of 3-high area (dig up/down from there)
     setStatus("Moving to start height")
     up()
 
