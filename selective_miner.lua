@@ -630,23 +630,9 @@ local function mainMining()
     end
 
     print("")
-    print("Press ENTER to start now, or wait 10 seconds...")
+    print("Press ENTER to start...")
     print("(CTRL+T to cancel)")
-
-    -- Race between user input and 10 second timer
-    local function waitForEnter()
-        read()
-    end
-    local function waitForTimer()
-        for i = 10, 1, -1 do
-            term.setCursorPos(1, select(2, term.getCursorPos()) - 1)
-            term.clearLine()
-            print("Auto-starting in " .. i .. " seconds... (press ENTER)")
-            sleep(1)
-        end
-    end
-
-    parallel.waitForAny(waitForEnter, waitForTimer)
+    read()
 
     print("GO!")
 
