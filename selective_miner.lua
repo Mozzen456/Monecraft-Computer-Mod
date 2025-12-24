@@ -8,20 +8,68 @@ local WIDTH = 50       -- Z direction (right)
 local HEIGHT = 4       -- Y direction (up)
 local CHANNEL = 100    -- Wireless channel (must match monitor)
 
--- Items to drop (common junk)
-local DROP_ITEMS = {
-    "minecraft:cobblestone",
-    "minecraft:stone",
-    "minecraft:dirt",
-    "minecraft:gravel",
-    "minecraft:sand",
-    "minecraft:netherrack",
-    "minecraft:cobbled_deepslate",
-    "minecraft:deepslate",
-    "minecraft:tuff",
-    "minecraft:granite",
-    "minecraft:diorite",
-    "minecraft:andesite",
+-- Keywords that indicate a block is an ore (NEVER drop these)
+local ORE_KEYWORDS = {
+    "ore",
+    "debris",    -- ancient debris
+    "cluster",   -- amethyst clusters, mod clusters
+    "diamond",
+    "emerald",
+    "gold",
+    "iron",
+    "copper",
+    "coal",
+    "lapis",
+    "redstone",
+    "quartz",
+}
+
+-- Junk items to DROP (specific items)
+local JUNK_ITEMS = {
+    -- Stone types
+    ["minecraft:cobblestone"] = true,
+    ["minecraft:stone"] = true,
+    ["minecraft:deepslate"] = true,
+    ["minecraft:cobbled_deepslate"] = true,
+    ["minecraft:andesite"] = true,
+    ["minecraft:diorite"] = true,
+    ["minecraft:granite"] = true,
+    ["minecraft:tuff"] = true,
+    ["minecraft:calcite"] = true,
+    ["minecraft:smooth_basalt"] = true,
+    ["minecraft:basalt"] = true,
+    ["minecraft:blackstone"] = true,
+    -- Dirt types
+    ["minecraft:dirt"] = true,
+    ["minecraft:gravel"] = true,
+    ["minecraft:sand"] = true,
+    ["minecraft:red_sand"] = true,
+    ["minecraft:clay"] = true,
+    ["minecraft:soul_sand"] = true,
+    ["minecraft:soul_soil"] = true,
+    ["minecraft:netherrack"] = true,
+    -- Other common junk
+    ["minecraft:flint"] = true,
+    ["minecraft:mossy_cobblestone"] = true,
+}
+
+-- Keywords that indicate junk (for mod support)
+local JUNK_KEYWORDS = {
+    "cobblestone",
+    "cobbled",
+    "stone",
+    "deepslate",
+    "dirt",
+    "gravel",
+    "sand",
+    "netherrack",
+    "andesite",
+    "diorite",
+    "granite",
+    "tuff",
+    "basalt",
+    "blackstone",
+    "slate",
 }
 
 -- ============== STATE VARIABLES ==============
@@ -81,27 +129,53 @@ end
 
 -- ============== INVENTORY MANAGEMENT ==============
 local function isJunk(itemName)
-    for _, junk in ipairs(DROP_ITEMS) do
-        if itemName == junk then
+    -- First check exact match in junk table
+    if JUNK_ITEMS[itemName] then
+        return true
+    end
+
+    local name = string.lower(itemName)
+
+    -- Check if it's an ore (NEVER drop ores)
+    for _, keyword in ipairs(ORE_KEYWORDS) do
+        if string.find(name, keyword) then
+            return false
+        end
+    end
+
+    -- Check if it matches junk keywords (for mod support)
+    for _, keyword in ipairs(JUNK_KEYWORDS) do
+        if string.find(name, keyword) then
             return true
         end
     end
+
+    -- If unsure, keep it
     return false
 end
 
 local function dropJunk()
+    local droppedSlots = 0
+    itemsKept = 0  -- Reset count
+
     for slot = 1, 16 do
         local item = turtle.getItemDetail(slot)
         if item then
             if isJunk(item.name) then
                 turtle.select(slot)
                 turtle.drop()
+                droppedSlots = droppedSlots + 1
             else
                 itemsKept = itemsKept + item.count
             end
         end
     end
+
     turtle.select(1)
+
+    if droppedSlots > 0 then
+        print("Dropped junk from " .. droppedSlots .. " slots, keeping " .. itemsKept .. " items")
+    end
 end
 
 local function getInventoryCount()
@@ -116,17 +190,10 @@ end
 
 -- ============== MOVEMENT FUNCTIONS ==============
 local function forward()
-    local attempts = 0
     while not turtle.forward() do
         turtle.dig()
+        sleep(0.1)
         turtle.attack()
-        sleep(0.3)
-        attempts = attempts + 1
-        if attempts > 20 then
-            setStatus("Blocked!")
-            sleep(2)
-            attempts = 0
-        end
     end
 
     if facing == 0 then posX = posX + 1
@@ -137,45 +204,37 @@ local function forward()
 end
 
 local function back()
-    if turtle.back() then
-        if facing == 0 then posX = posX - 1
-        elseif facing == 1 then posZ = posZ - 1
-        elseif facing == 2 then posX = posX + 1
-        elseif facing == 3 then posZ = posZ + 1
-        end
-        return true
+    while not turtle.back() do
+        turtle.turnLeft()
+        turtle.turnLeft()
+        turtle.dig()
+        sleep(0.1)
+        turtle.attack()
+        turtle.turnLeft()
+        turtle.turnLeft()
     end
-    return false
+
+    if facing == 0 then posX = posX - 1
+    elseif facing == 1 then posZ = posZ - 1
+    elseif facing == 2 then posX = posX + 1
+    elseif facing == 3 then posZ = posZ + 1
+    end
 end
 
 local function up()
-    local attempts = 0
     while not turtle.up() do
         turtle.digUp()
+        sleep(0.1)
         turtle.attackUp()
-        sleep(0.3)
-        attempts = attempts + 1
-        if attempts > 20 then
-            setStatus("Blocked above!")
-            sleep(2)
-            attempts = 0
-        end
     end
     posY = posY + 1
 end
 
 local function down()
-    local attempts = 0
     while not turtle.down() do
         turtle.digDown()
+        sleep(0.1)
         turtle.attackDown()
-        sleep(0.3)
-        attempts = attempts + 1
-        if attempts > 20 then
-            setStatus("Blocked below!")
-            sleep(2)
-            attempts = 0
-        end
     end
     posY = posY - 1
 end
@@ -345,6 +404,14 @@ local function listenForRecall()
     end
 end
 
+-- ============== BACKGROUND STATUS SENDER ==============
+local function statusLoop()
+    while true do
+        sendStatus()
+        sleep(5)  -- Send status every 5 seconds
+    end
+end
+
 -- ============== MAIN PROGRAM ==============
 local function mainMining()
     print("=================================")
@@ -409,7 +476,7 @@ end
 
 -- ============== RUN ==============
 if modem then
-    parallel.waitForAny(mainMining, listenForRecall)
+    parallel.waitForAny(mainMining, listenForRecall, statusLoop)
 else
     mainMining()
 end
